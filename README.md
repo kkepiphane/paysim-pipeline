@@ -82,16 +82,11 @@ make up            # UI sur http://localhost:8080
 > `airflow` (uid 50000) du conteneur. Sans ça, Docker crée `./logs` en root au premier
 > lancement et le scheduler plante avec `PermissionError` en écrivant ses logs.
 
-**Se connecter à l'UI.** Le compte `admin` est créé automatiquement au premier
-démarrage (commande `airflow standalone`), avec un mot de passe généré aléatoirement
-— il n'est **jamais** committé dans le repo. Pour le récupérer :
-
-```bash
-docker compose exec airflow cat /opt/airflow/standalone_admin_password.txt
-```
-
-(Si la commande échoue juste après `make up`, patiente quelques secondes : Airflow
-est encore en train d'initialiser la base et de créer l'utilisateur.)
+**Se connecter à l'UI.** Identifiants par défaut : `admin` / `admin`
+(définis dans `.env` via `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD`, créés
+au démarrage grâce aux variables `_AIRFLOW_WWW_USER_*` de l'image officielle Airflow).
+Change ces valeurs dans `.env` avant de lancer `make up` si le port 8080 est exposé
+au-delà de ta machine locale — ce ne sont pas des identifiants pensés pour un accès public.
 
 ---
 
