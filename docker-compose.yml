@@ -1,0 +1,22 @@
+# Stack minimale Airflow (executor local) pour faire tourner le pipeline.
+# Pour un vrai cluster, remplacer par le compose officiel Airflow + Celery.
+version: "3.8"
+
+services:
+  airflow:
+    build: .
+    image: paysim-pipeline:latest
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - DATA_ROOT=/opt/airflow/data
+      - PYTHONPATH=/opt/airflow
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./src:/opt/airflow/src
+      - ./data:/opt/airflow/data
+      - ./logs:/opt/airflow/logs
+    ports:
+      - "8080:8080"
+    command: standalone

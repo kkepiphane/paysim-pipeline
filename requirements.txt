@@ -1,0 +1,8 @@
+pyspark==3.5.1
+apache-airflow==2.9.3
+great-expectations==0.18.19
+duckdb==1.0.0
+pandas==2.2.2
+pyarrow==16.1.0
+pytest==8.2.2
+python-dotenv==1.0.1
