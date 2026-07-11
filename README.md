@@ -42,6 +42,7 @@ CSV source (6.3M lignes)
 | Traitement | **PySpark 3.5** | distribué, adapté à la volumétrie |
 | Stockage | **Parquet** | colonnaire, compressé, splittable |
 | Orchestration | **Airflow 2.9** | DAG idempotent, dépendances |
+| Metadata DB | **PostgreSQL 16** | backend Airflow (SQLite non recommandé hors tests) |
 | Qualité | **Great Expectations / assertions** | contrats intégrés au pipeline |
 | Requêtes | **DuckDB** | analytique rapide sans serveur |
 | Reproductibilité | **Docker** | environnement identique |
@@ -76,6 +77,21 @@ make test          # tests unitaires
 make up            # UI sur http://localhost:8080
 # Déclencher le DAG "paysim_medallion_pipeline"
 ```
+
+> `make up` exécute d'abord `init-dirs`, qui donne à `./logs` les droits de l'utilisateur
+> `airflow` (uid 50000) du conteneur. Sans ça, Docker crée `./logs` en root au premier
+> lancement et le scheduler plante avec `PermissionError` en écrivant ses logs.
+
+**Se connecter à l'UI.** Le compte `admin` est créé automatiquement au premier
+démarrage (commande `airflow standalone`), avec un mot de passe généré aléatoirement
+— il n'est **jamais** committé dans le repo. Pour le récupérer :
+
+```bash
+docker compose exec airflow cat /opt/airflow/standalone_admin_password.txt
+```
+
+(Si la commande échoue juste après `make up`, patiente quelques secondes : Airflow
+est encore en train d'initialiser la base et de créer l'utilisateur.)
 
 ---
 
@@ -117,6 +133,8 @@ Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucu
 ## Pistes d'extension
 
 - Couche streaming Kafka pour l'ingestion temps réel
-- Dashboard Streamlit branché sur le Gold
+- Dashboard Streamlit branché sur le Gold — charger les agrégats dans **Postgres**
+  (déjà présent pour Airflow) plutôt que de rescanner du Parquet à chaque requête
+  concurrente, DuckDB restant le bon choix pour l'analytique ad hoc en local
 - Modèle ML de scoring de fraude (baseline vs Isolation Forest)
 - Migration vers Delta Lake (transactions ACID, time travel)
