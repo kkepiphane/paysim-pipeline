@@ -1,5 +1,6 @@
 pyspark==3.5.1
 apache-airflow==2.9.3
+psycopg2-binary==2.9.9
 great-expectations==0.18.19
 duckdb==1.0.0
 pandas==2.2.2

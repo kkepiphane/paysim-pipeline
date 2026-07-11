@@ -1,6 +1,12 @@
-.PHONY: up down test bronze silver gold pipeline analytics
+.PHONY: up down init-dirs test bronze silver gold pipeline analytics
 
-up:            ## Démarre Airflow (UI sur http://localhost:8080)
+init-dirs:     ## Prépare ./logs avec les droits de l'utilisateur airflow (uid 50000) du conteneur
+	mkdir -p logs
+	docker run --rm -u root -v $(CURDIR)/logs:/opt/airflow/logs \
+		--entrypoint bash apache/airflow:2.9.3-python3.11 \
+		-c "chown -R 50000:0 /opt/airflow/logs && chmod -R 775 /opt/airflow/logs"
+
+up: init-dirs  ## Démarre Airflow (UI sur http://localhost:8080)
 	docker compose up --build
 
 down:          ## Arrête la stack

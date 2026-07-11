@@ -1,17 +1,38 @@
-# Stack minimale Airflow (executor local) pour faire tourner le pipeline.
+# Stack minimale Airflow (LocalExecutor + Postgres) pour faire tourner le pipeline.
 # Pour un vrai cluster, remplacer par le compose officiel Airflow + Celery.
-version: "3.8"
+# version: "3.8"
 
 services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-airflow}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-airflow}
+      - POSTGRES_DB=${POSTGRES_DB:-airflow}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-airflow}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   airflow:
     build: .
     image: paysim-pipeline:latest
+    depends_on:
+      postgres:
+        condition: service_healthy
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=sqlite:////opt/airflow/airflow.db
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow}@postgres/${POSTGRES_DB:-airflow}
       - DATA_ROOT=/opt/airflow/data
       - PYTHONPATH=/opt/airflow
+      - _AIRFLOW_DB_MIGRATE=true
+      - _AIRFLOW_WWW_USER_CREATE=true
+      - _AIRFLOW_WWW_USER_USERNAME=${AIRFLOW_ADMIN_USER:-admin}
+      - _AIRFLOW_WWW_USER_PASSWORD=${AIRFLOW_ADMIN_PASSWORD:-admin}
     volumes:
       - ./dags:/opt/airflow/dags
       - ./src:/opt/airflow/src
@@ -20,3 +41,6 @@ services:
     ports:
       - "8080:8080"
     command: standalone
+
+volumes:
+  postgres_data:
