@@ -77,6 +77,13 @@ make load-warehouse   # démarre le Postgres warehouse + y charge le Gold
 make dashboard        # UI sur http://localhost:8501
 ```
 
+Les deux tournent en conteneur (service `dashboard` dans `docker-compose.yml`,
+même image que le service `airflow`) : `load-warehouse` fait un
+`docker compose run --rm dashboard python -m src.warehouse.load`, `dashboard`
+un `docker compose up dashboard`. Aucun venv local requis — les dépendances
+sont déjà figées dans l'image au moment du build (`make up` ou
+`docker compose build airflow`), pas installées au runtime.
+
 **Pourquoi un second Postgres et pas réutiliser celui d'Airflow ?** La metadata DB d'Airflow (`dag_run`, `task_instance`, ...) est une base opérationnelle avec son propre cycle de vie ; y ajouter des tables métier consultées par un dashboard mélangerait deux charges et deux responsabilités différentes. Le warehouse est une instance Postgres à part (`docker-compose.yml`, service `warehouse`, port `5433`).
 
 **Pourquoi ne charger que les agrégats, jamais `fact_transactions` ni `dim_account` ?** Ce sont des tables de plusieurs millions de lignes — les recharger dans Postgres à chaque run serait lent et inutile : le dashboard n'a besoin que des agrégats déjà réduits (quelques centaines de lignes) et d'un résumé KPI, calculé une fois par DuckDB directement sur le Parquet.
@@ -148,16 +155,25 @@ make pipeline      # bronze → silver → gold
 make analytics     # requêtes DuckDB
 make test          # tests unitaires
 make ml            # feature engineering + scoring de fraude
-make load-warehouse && make dashboard   # dashboard Streamlit
 make produce && make consume            # streaming Kafka
 ```
 
-> Tous les `make` ci-dessus (hors `make up`/`make down`, qui tournent dans Docker)
-> exécutent des scripts Python locaux (`python`, `streamlit`, ...) — ils doivent
-> être lancés avec le venv **activé** dans le terminal courant (`source .venv/bin/activate`).
+> Ces `make` exécutent des scripts Python **locaux** — ils doivent tourner avec
+> le venv **activé** dans le terminal courant (`source .venv/bin/activate`).
 > `make` hérite du PATH du shell qui l'appelle ; sans venv activé tu auras
 > `python: Aucun fichier ou dossier de ce nom` (Ubuntu ne fournit pas de binaire
-> `python` nu) ou `streamlit: commande introuvable`.
+> `python` nu).
+
+```bash
+make load-warehouse   # charge le Gold dans le warehouse Postgres (conteneur)
+make dashboard        # UI sur http://localhost:8501 (conteneur)
+```
+
+> Ces deux-là tournent entièrement dans Docker (image `paysim-pipeline:latest`,
+> déjà buildée par `make up`/`docker compose build airflow`) — **aucun venv
+> requis**, pas de dépendance au PATH du shell courant. C'est le pattern à
+> privilégier en prod : dépendances figées dans l'image au build, jamais un
+> `pip install` ou une activation manuelle au runtime.
 
 ### Avec Airflow (Docker)
 

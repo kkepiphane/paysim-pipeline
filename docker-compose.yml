@@ -54,6 +54,27 @@ services:
       - KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR=1
       - KAFKA_AUTO_CREATE_TOPICS_ENABLE=true
 
+  dashboard:
+    image: paysim-pipeline:latest
+    depends_on:
+      warehouse:
+        condition: service_healthy
+    environment:
+      - WAREHOUSE_USER=${WAREHOUSE_USER:-warehouse}
+      - WAREHOUSE_PASSWORD=${WAREHOUSE_PASSWORD:-warehouse}
+      - WAREHOUSE_DB=${WAREHOUSE_DB:-warehouse}
+      - WAREHOUSE_HOST=warehouse
+      - WAREHOUSE_PORT=5432
+      - DATA_ROOT=/opt/airflow/data
+      - PYTHONPATH=/opt/airflow
+    volumes:
+      - ./src:/opt/airflow/src
+      - ./dashboard:/opt/airflow/dashboard
+      - ./data:/opt/airflow/data
+    ports:
+      - "8501:8501"
+    command: python -m streamlit run dashboard/app.py --server.address 0.0.0.0
+
   airflow:
     build: .
     image: paysim-pipeline:latest

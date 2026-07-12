@@ -43,11 +43,11 @@ ml: ml-features ml-train  ## Pipeline ML complet (features + entraînement + év
 warehouse-up:  ## Démarre uniquement le Postgres warehouse (dashboard), sans Airflow
 	docker compose up -d warehouse
 
-load-warehouse: warehouse-up  ## Charge les agrégats Gold dans le warehouse Postgres
-	python -m src.warehouse.load
+load-warehouse: warehouse-up  ## Charge les agrégats Gold dans le warehouse Postgres (conteneur, aucun venv requis)
+	docker compose run --rm dashboard python -m src.warehouse.load
 
-dashboard:     ## Lance le dashboard Streamlit (UI sur http://localhost:8501)
-	streamlit run dashboard/app.py
+dashboard:     ## Lance le dashboard Streamlit en conteneur (UI sur http://localhost:8501)
+	docker compose up dashboard
 
 kafka-up:      ## Démarre uniquement le broker Kafka
 	docker compose up -d kafka
