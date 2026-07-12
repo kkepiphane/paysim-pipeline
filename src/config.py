@@ -25,6 +25,34 @@ ML_METRICS_PATH = DATA_ROOT / "ml" / "metrics.json"
 SOURCE_FILE = os.getenv("SOURCE_FILE", "PS_20174392719_1491204439457_log.csv")
 SOURCE_PATH = RAW_DIR / SOURCE_FILE
 
+# Bronze streaming : répertoire séparé du Bronze batch (bronze/transactions).
+# Le consumer Kafka écrit en mode append (chaque micro-batch = un nouvel
+# arrivage), incompatible avec le mode overwrite idempotent du Bronze batch —
+# les deux origines ne doivent jamais partager un répertoire.
+STREAMING_BRONZE_DIR = DATA_ROOT / "bronze_streaming" / "transactions"
+
+# --- Kafka (simulation d'ingestion temps réel) ------------------------------
+KAFKA_BOOTSTRAP_SERVERS = os.getenv("KAFKA_BOOTSTRAP_SERVERS", "localhost:9092")
+KAFKA_TOPIC = os.getenv("KAFKA_TOPIC", "paysim-transactions")
+
+# --- Warehouse (Postgres de service pour le dashboard) ----------------------
+# Instance dédiée, séparée de la metadata DB Airflow : on ne mélange pas la
+# base opérationnelle d'Airflow (dag_run, task_instance, ...) avec des tables
+# métier consultées par un dashboard BI — deux charges et deux cycles de vie
+# différents.
+WAREHOUSE_USER = os.getenv("WAREHOUSE_USER", "warehouse")
+WAREHOUSE_PASSWORD = os.getenv("WAREHOUSE_PASSWORD", "warehouse")
+WAREHOUSE_DB = os.getenv("WAREHOUSE_DB", "warehouse")
+WAREHOUSE_HOST = os.getenv("WAREHOUSE_HOST", "localhost")
+WAREHOUSE_PORT = os.getenv("WAREHOUSE_PORT", "5433")
+
+
+def warehouse_url() -> str:
+    return (
+        f"postgresql+psycopg2://{WAREHOUSE_USER}:{WAREHOUSE_PASSWORD}"
+        f"@{WAREHOUSE_HOST}:{WAREHOUSE_PORT}/{WAREHOUSE_DB}"
+    )
+
 # --- Seuils métier ---------------------------------------------------------
 # Au-delà de ce taux d'incohérence de solde, le DAG échoue (gate qualité).
 #

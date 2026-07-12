@@ -1,10 +1,12 @@
 # Données (jamais versionnées)
 data/raw/*
 data/bronze/*
+data/bronze_streaming/*
 data/silver/*
 data/gold/*
 !data/raw/.gitkeep
 !data/bronze/.gitkeep
+!data/bronze_streaming/.gitkeep
 !data/silver/.gitkeep
 !data/gold/.gitkeep
 

@@ -62,6 +62,53 @@ make ml-train       # entraînement + évaluation (scikit-learn -> data/ml/)
 
 ---
 
+## Dashboard (Streamlit + warehouse Postgres)
+
+```
+Gold (agrégats)
+     │
+  LOAD-WAREHOUSE  ── charge agg_*, dim_transaction_type + un résumé KPI
+     │               dans un Postgres dédié ("warehouse", séparé de celui d'Airflow)
+  DASHBOARD        ── Streamlit lit le warehouse (jamais le Parquet directement)
+```
+
+```bash
+make load-warehouse   # démarre le Postgres warehouse + y charge le Gold
+make dashboard        # UI sur http://localhost:8501
+```
+
+**Pourquoi un second Postgres et pas réutiliser celui d'Airflow ?** La metadata DB d'Airflow (`dag_run`, `task_instance`, ...) est une base opérationnelle avec son propre cycle de vie ; y ajouter des tables métier consultées par un dashboard mélangerait deux charges et deux responsabilités différentes. Le warehouse est une instance Postgres à part (`docker-compose.yml`, service `warehouse`, port `5433`).
+
+**Pourquoi ne charger que les agrégats, jamais `fact_transactions` ni `dim_account` ?** Ce sont des tables de plusieurs millions de lignes — les recharger dans Postgres à chaque run serait lent et inutile : le dashboard n'a besoin que des agrégats déjà réduits (quelques centaines de lignes) et d'un résumé KPI, calculé une fois par DuckDB directement sur le Parquet.
+
+**Pourquoi pas `DataFrame.to_sql`/`read_sql_table` ?** pandas ≥ 2.1 exige SQLAlchemy ≥ 2.0 pour ces raccourcis, mais `apache-airflow==2.9.3` impose SQLAlchemy < 2.0 dans ce même `requirements.txt`. Plutôt que de dégrader silencieusement vers un mode SQLite non fonctionnel (le comportement par défaut de pandas quand la version ne convient pas), `src/warehouse/load.py` écrit/lit via SQLAlchemy Core directement — explicite, sans dépendre d'une passerelle interne de pandas.
+
+---
+
+## Streaming (Kafka)
+
+```
+CSV source
+     │
+  PRODUCER   ── rejoue le CSV ligne à ligne vers Kafka (topic paysim-transactions)
+     │
+  CONSUMER   ── micro-batches -> Parquet, partitionné par `type`
+     │           (data/bronze_streaming/, séparé du Bronze batch, mode append)
+```
+
+```bash
+make produce   # démarre Kafka + rejoue 1000 lignes du CSV (--limit/--rate configurables)
+make consume   # consomme le topic par micro-batches (--batch-size/--batch-timeout)
+```
+
+**Pourquoi un répertoire séparé du Bronze batch ?** `ingest_bronze` écrit en `mode=overwrite` (idempotent : rejouer tout le DAG ne duplique rien). Un flux streaming est par nature additif — chaque micro-batch est un nouvel arrivage, pas un rejeu complet. Mélanger les deux dans un même répertoire casserait l'idempotence de l'un ou l'autre. Le schéma de sortie reste néanmoins identique (mêmes colonnes, même partitionnement par `type`), pour qu'un même Silver puisse en principe consommer les deux origines.
+
+**Pourquoi `confluent-kafka` et pas `kafka-python` ?** `kafka-python` vendait sa propre copie de `six`, cassée sous Python 3.12 (`ModuleNotFoundError: kafka.vendor.six.moves`) — un problème connu, non corrigé dans la dernière release. `confluent-kafka` (wheel précompilée autour de `librdkafka`) fonctionne sans contournement.
+
+**Pourquoi Confluent (`cp-kafka` + `cp-zookeeper`) et pas l'image `apache/kafka` en mode KRaft (sans Zookeeper) ?** KRaft est plus simple (un seul conteneur) et c'est le sens de l'histoire pour Kafka, mais nécessite ici de tirer une image non testée dans tous les environnements réseau. Le couple Confluent est le standard le plus largement répandu et fonctionne de façon identique côté producer/consumer — seul le `docker-compose.yml` change si tu migres vers KRaft plus tard.
+
+---
+
 ## Stack
 
 | Composant | Outil | Rôle |
@@ -73,6 +120,8 @@ make ml-train       # entraînement + évaluation (scikit-learn -> data/ml/)
 | Qualité | **Great Expectations / assertions** | contrats intégrés au pipeline |
 | Requêtes | **DuckDB** | analytique rapide sans serveur |
 | ML | **scikit-learn** | scoring de fraude sur la table de features |
+| Dashboard | **Streamlit + Plotly** | BI, branché sur un warehouse Postgres dédié |
+| Streaming | **Kafka (Confluent)** | simulation d'ingestion temps réel |
 | Reproductibilité | **Docker** | environnement identique |
 
 ---
@@ -91,13 +140,24 @@ make ml-train       # entraînement + évaluation (scikit-learn -> data/ml/)
 ### En local (sans Airflow)
 
 ```bash
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 export PYTHONPATH=$(pwd)
 
 make pipeline      # bronze → silver → gold
 make analytics     # requêtes DuckDB
 make test          # tests unitaires
+make ml            # feature engineering + scoring de fraude
+make load-warehouse && make dashboard   # dashboard Streamlit
+make produce && make consume            # streaming Kafka
 ```
+
+> Tous les `make` ci-dessus (hors `make up`/`make down`, qui tournent dans Docker)
+> exécutent des scripts Python locaux (`python`, `streamlit`, ...) — ils doivent
+> être lancés avec le venv **activé** dans le terminal courant (`source .venv/bin/activate`).
+> `make` hérite du PATH du shell qui l'appelle ; sans venv activé tu auras
+> `python: Aucun fichier ou dossier de ce nom` (Ubuntu ne fournit pas de binaire
+> `python` nu) ou `streamlit: commande introuvable`.
 
 ### Avec Airflow (Docker)
 
@@ -153,7 +213,10 @@ Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucu
 │   ├── silver/        nettoyage
 │   ├── gold/          modélisation dimensionnelle
 │   ├── quality/       gates de qualité
-│   └── ml/            feature engineering + scoring de fraude
+│   ├── ml/            feature engineering + scoring de fraude
+│   ├── warehouse/     chargement des agrégats Gold -> Postgres
+│   └── streaming/     producer/consumer Kafka (bronze_streaming)
+├── dashboard/         dashboard Streamlit (lit le warehouse)
 ├── sql/               requêtes analytiques DuckDB
 ├── tests/             tests unitaires pytest
 └── docs/              architecture détaillée
@@ -163,8 +226,6 @@ Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucu
 
 ## Pistes d'extension
 
-- Couche streaming Kafka pour l'ingestion temps réel
-- Dashboard Streamlit branché sur le Gold — charger les agrégats dans **Postgres**
-  (déjà présent pour Airflow) plutôt que de rescanner du Parquet à chaque requête
-  concurrente, DuckDB restant le bon choix pour l'analytique ad hoc en local
-- Migration vers Delta Lake (transactions ACID, time travel)
+- Migration vers Delta Lake (transactions ACID, time travel) — nécessite un accès
+  à Maven Central pour résoudre le JAR `io.delta:delta-spark` au démarrage de la
+  session Spark, indisponible dans certains environnements réseau restreints
