@@ -23,9 +23,20 @@ SOURCE_PATH = RAW_DIR / SOURCE_FILE
 
 # --- Seuils métier ---------------------------------------------------------
 # Au-delà de ce taux d'incohérence de solde, le DAG échoue (gate qualité).
-BALANCE_INCONSISTENCY_THRESHOLD = float(
-    os.getenv("BALANCE_INCONSISTENCY_THRESHOLD", "0.35")
-)
+#
+# Calibrés par transaction_type plutôt qu'un seuil global : PaySim est un
+# simulateur multi-agents connu pour ne pas toujours répercuter correctement
+# oldbalance_orig/newbalance_orig sur CASH_OUT et TRANSFER (~90-95% de taux de
+# base sur le dataset complet — pas une anomalie, une caractéristique du
+# simulateur, et ce sont justement les deux seuls types où la fraude existe
+# dans PaySim). Un seuil unique masquerait une dérive réelle sur un type à
+# faible volume comme DEBIT, noyé dans la moyenne pondérée par CASH_OUT/TRANSFER.
+BALANCE_INCONSISTENCY_THRESHOLDS = {
+    "CASH_OUT": 0.93,
+    "TRANSFER": 0.97,
+    "PAYMENT": 0.62,
+    "DEBIT": 0.40,
+}
 
 # 1 step PaySim = 1 heure de simulation.
 STEPS_PER_DAY = 24

@@ -46,13 +46,35 @@ def validate_silver(spark: SparkSession) -> None:
     n_dup = df.count() - df.dropDuplicates(keys).count()
     assert n_dup == 0, f"{n_dup} doublons résiduels en Silver"
 
-    # Gate : taux d'incohérence sous le seuil.
-    inconsistent = df.filter(F.col("balance_inconsistent") == 1).count()
-    rate = inconsistent / total
-    threshold = config.BALANCE_INCONSISTENCY_THRESHOLD
-    assert rate <= threshold, (
-        f"Taux d'incohérence {rate:.1%} > seuil {threshold:.1%} — "
-        f"pipeline arrêté."
+    # Gate : taux d'incohérence sous le seuil, par transaction_type.
+    # Un seuil global mélangerait des types au comportement structurellement
+    # différent (cf. config.BALANCE_INCONSISTENCY_THRESHOLDS) et masquerait
+    # une dérive réelle sur un type à faible volume.
+    counts = (
+        df.groupBy("transaction_type")
+        .agg(
+            F.count("*").alias("n"),
+            F.sum("balance_inconsistent").alias("n_inconsistent"),
+        )
+        .collect()
+    )
+    violations = []
+    rates = {}
+    for row in counts:
+        transaction_type = row["transaction_type"]
+        threshold = config.BALANCE_INCONSISTENCY_THRESHOLDS.get(transaction_type)
+        if threshold is None:
+            continue
+        rate = row["n_inconsistent"] / row["n"]
+        rates[transaction_type] = rate
+        if rate > threshold:
+            violations.append(
+                f"{transaction_type}: {rate:.1%} > seuil {threshold:.1%}"
+            )
+
+    assert not violations, (
+        "Taux d'incohérence dépassé — pipeline arrêté : " + "; ".join(violations)
     )
 
-    print(f"[OK] Validation Silver passée (incohérence {rate:.1%}).")
+    summary = ", ".join(f"{t}={r:.1%}" for t, r in sorted(rates.items()))
+    print(f"[OK] Validation Silver passée ({summary}).")

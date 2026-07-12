@@ -78,9 +78,10 @@ make up            # UI sur http://localhost:8080
 # Déclencher le DAG "paysim_medallion_pipeline"
 ```
 
-> `make up` exécute d'abord `init-dirs`, qui donne à `./logs` les droits de l'utilisateur
-> `airflow` (uid 50000) du conteneur. Sans ça, Docker crée `./logs` en root au premier
-> lancement et le scheduler plante avec `PermissionError` en écrivant ses logs.
+> `make up` exécute d'abord `init-dirs`, qui donne à `./logs` et `./data/{bronze,silver,gold}`
+> les droits de l'utilisateur `airflow` (uid 50000) du conteneur. Sans ça, ces dossiers
+> appartiennent à ton utilisateur hôte (ou à root) et Spark/le scheduler plantent avec
+> `PermissionError` / `Mkdirs failed` en essayant d'y écrire.
 
 **Se connecter à l'UI.** Identifiants par défaut : `admin` / `admin`
 (définis dans `.env` via `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD`, créés
@@ -103,6 +104,9 @@ Conserver la donnée brute telle quelle garantit la traçabilité et permet de r
 
 **Les soldes destinataires marchands à zéro : bug ou métier ?**
 Caractéristique du jeu de données : les soldes des comptes marchands (`M`) ne sont pas suivis. On ne flague donc l'incohérence que côté émetteur, sans supprimer d'information — on ajoute une colonne `balance_inconsistent` au lieu de filtrer des lignes.
+
+**Pourquoi un seuil de gate par `transaction_type` et pas un seuil global ?**
+Sur le dataset complet (6,3M lignes), le taux d'incohérence de solde varie énormément selon le type : ~95% sur `TRANSFER`, ~89% sur `CASH_OUT` (le simulateur PaySim ne répercute pas toujours correctement le solde émetteur sur ces deux types — precisément les deux seuls où la fraude existe dans ce dataset), contre ~54% sur `PAYMENT` et ~30% sur `DEBIT`. Un seuil global mélangerait ces populations et serait soit toujours en échec (si calé sous 90%), soit incapable de détecter une vraie dérive sur un type à faible volume comme `DEBIT`, noyé dans la moyenne pondérée. Les seuils par type vivent dans `config.BALANCE_INCONSISTENCY_THRESHOLDS`.
 
 **Idempotence.**
 Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucune donnée.
