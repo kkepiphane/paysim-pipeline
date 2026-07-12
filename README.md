@@ -35,6 +35,33 @@ CSV source (6.3M lignes)
 
 ---
 
+## Scoring de fraude (ML)
+
+```
+Silver (TRANSFER + CASH_OUT uniquement)
+     │
+  FEATURES  ── error_balance_orig/dest, hour_of_day, is_transfer, ...
+     │        (Spark, écrit Gold/ml_features)
+  TRAIN     ── Logistic Regression (baseline) vs Isolation Forest (anomalie)
+     │        (scikit-learn, PR-AUC comme métrique de référence)
+  data/ml/  ── models/*.joblib + metrics.json
+```
+
+```bash
+make ml-features   # feature engineering (Spark -> Gold/ml_features)
+make ml-train       # entraînement + évaluation (scikit-learn -> data/ml/)
+```
+
+**Pourquoi restreindre à TRANSFER/CASH_OUT ?** Dans PaySim, `isFraud` ne vaut jamais 1 en dehors de ces deux types (vérifié sur les 6,3M lignes). Entraîner sur CASH_IN/PAYMENT/DEBIT n'ajouterait aucun signal et diluerait encore plus un déséquilibre de classe déjà extrême (~0,3% de fraude sur la population éligible).
+
+**Pourquoi PR-AUC plutôt qu'accuracy ?** Avec ~0,3% de positifs, un modèle qui prédit toujours "non fraude" atteint 99,7% d'accuracy en étant inutile. PR-AUC (average precision) et le rappel/précision sur la classe minoritaire sont les métriques qui comptent ici.
+
+**Pourquoi scikit-learn et pas Spark ML pour Isolation Forest ?** Spark ML n'implémente pas Isolation Forest nativement. Spark fait l'ETL à l'échelle (feature engineering sur 6,3M lignes), scikit-learn prend le relais sur la table de features déjà réduite (2,77M lignes, ~10 colonnes) qui tient confortablement en mémoire — découpage standard plutôt que de forcer un algorithme non distribué dans Spark.
+
+**Résultats de référence** (dataset complet) : Logistic Regression atteint un rappel de 97,7% pour une précision de 4% (PR-AUC 0,684) — bon filet de sécurité, beaucoup de faux positifs à trier ensuite. Isolation Forest plafonne à PR-AUC 0,046, à peine mieux qu'aléatoire : la fraude sur ce dataset n'est pas structurellement "isolée" dans l'espace des features au sens non supervisé, ce qui est en soi un résultat instructif — la détection d'anomalie non supervisée n'est pas une solution universelle.
+
+---
+
 ## Stack
 
 | Composant | Outil | Rôle |
@@ -45,6 +72,7 @@ CSV source (6.3M lignes)
 | Metadata DB | **PostgreSQL 16** | backend Airflow (SQLite non recommandé hors tests) |
 | Qualité | **Great Expectations / assertions** | contrats intégrés au pipeline |
 | Requêtes | **DuckDB** | analytique rapide sans serveur |
+| ML | **scikit-learn** | scoring de fraude sur la table de features |
 | Reproductibilité | **Docker** | environnement identique |
 
 ---
@@ -78,10 +106,13 @@ make up            # UI sur http://localhost:8080
 # Déclencher le DAG "paysim_medallion_pipeline"
 ```
 
-> `make up` exécute d'abord `init-dirs`, qui donne à `./logs` et `./data/{bronze,silver,gold}`
-> les droits de l'utilisateur `airflow` (uid 50000) du conteneur. Sans ça, ces dossiers
-> appartiennent à ton utilisateur hôte (ou à root) et Spark/le scheduler plantent avec
-> `PermissionError` / `Mkdirs failed` en essayant d'y écrire.
+> `make up` exécute d'abord `init-dirs`, qui rend `./logs` et `./data/{bronze,silver,gold}`
+> accessibles en écriture à la fois pour l'utilisateur `airflow` (uid 50000) du conteneur
+> et pour ton utilisateur hôte (`chmod 777` — acceptable ici car projet local mono-utilisateur,
+> pas un service exposé). Sans ça, ces dossiers appartiennent à un seul des deux mondes et
+> soit Airflow/Spark plante avec `PermissionError`/`Mkdirs failed` côté conteneur, soit
+> `make bronze`/`make gold`/`make ml-*` en local échoue à écrire dans des dossiers déjà
+> possédés par le conteneur suite à un run Docker précédent.
 
 **Se connecter à l'UI.** Identifiants par défaut : `admin` / `admin`
 (définis dans `.env` via `AIRFLOW_ADMIN_USER` / `AIRFLOW_ADMIN_PASSWORD`, créés
@@ -121,7 +152,8 @@ Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucu
 │   ├── bronze/        ingestion
 │   ├── silver/        nettoyage
 │   ├── gold/          modélisation dimensionnelle
-│   └── quality/       gates de qualité
+│   ├── quality/       gates de qualité
+│   └── ml/            feature engineering + scoring de fraude
 ├── sql/               requêtes analytiques DuckDB
 ├── tests/             tests unitaires pytest
 └── docs/              architecture détaillée
@@ -135,5 +167,4 @@ Chaque tâche écrit en `mode=overwrite`. Rejouer le DAG entier ne duplique aucu
 - Dashboard Streamlit branché sur le Gold — charger les agrégats dans **Postgres**
   (déjà présent pour Airflow) plutôt que de rescanner du Parquet à chaque requête
   concurrente, DuckDB restant le bon choix pour l'analytique ad hoc en local
-- Modèle ML de scoring de fraude (baseline vs Isolation Forest)
 - Migration vers Delta Lake (transactions ACID, time travel)
